@@ -2,19 +2,12 @@
 #include "macro-action-edit.hpp"
 #include "variable-text-edit.hpp"
 #include "source-selection.hpp"
+#include "source-interact.hpp"
 
 #include <QSpinBox>
 #include <QLabel>
 #include <QPushButton>
 #include <QComboBox>
-
-enum class SourceAction {
-	ENABLE,
-	DISABLE,
-	SETTINGS,
-	REFRESH_SETTINGS,
-	SETTINGS_BUTTON,
-};
 
 struct SourceSettingButton {
 	bool Save(obs_data_t *obj) const;
@@ -39,10 +32,20 @@ public:
 		return std::make_shared<MacroActionSource>(m);
 	}
 
+	enum class Action {
+		ENABLE,
+		DISABLE,
+		SETTINGS,
+		REFRESH_SETTINGS,
+		SETTINGS_BUTTON,
+		INTERACT,
+	};
+
 	SourceSelection _source;
-	SourceSettingButton _button;
 	VariableResolvingString _settings = "";
-	SourceAction _action = SourceAction::ENABLE;
+	SourceSettingButton _button;
+	SourceInteraction _interaction;
+	Action _action = Action::ENABLE;
 
 private:
 	static bool _registered;
@@ -71,6 +74,8 @@ private slots:
 	void ButtonChanged(int idx);
 	void GetSettingsClicked();
 	void SettingsChanged();
+	void InteractionTypeChanged(SourceInteraction::Type value);
+	void InteractionSettingsChanged(SourceInteractionInstance *value);
 signals:
 	void HeaderInfoChanged(const QString &);
 
@@ -81,6 +86,8 @@ protected:
 	QPushButton *_getSettings;
 	VariableTextEdit *_settings;
 	QLabel *_warning;
+	SourceInteractionWidget *_interaction;
+
 	std::shared_ptr<MacroActionSource> _entryData;
 
 private:

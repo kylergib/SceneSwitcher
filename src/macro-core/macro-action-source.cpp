@@ -11,15 +11,19 @@ bool MacroActionSource::_registered = MacroActionFactory::Register(
 	{MacroActionSource::Create, MacroActionSourceEdit::Create,
 	 "AdvSceneSwitcher.action.source"});
 
-const static std::map<SourceAction, std::string> actionTypes = {
-	{SourceAction::ENABLE, "AdvSceneSwitcher.action.source.type.enable"},
-	{SourceAction::DISABLE, "AdvSceneSwitcher.action.source.type.disable"},
-	{SourceAction::SETTINGS,
+const static std::map<MacroActionSource::Action, std::string> actionTypes = {
+	{MacroActionSource::Action::ENABLE,
+	 "AdvSceneSwitcher.action.source.type.enable"},
+	{MacroActionSource::Action::DISABLE,
+	 "AdvSceneSwitcher.action.source.type.disable"},
+	{MacroActionSource::Action::SETTINGS,
 	 "AdvSceneSwitcher.action.source.type.settings"},
-	{SourceAction::REFRESH_SETTINGS,
+	{MacroActionSource::Action::REFRESH_SETTINGS,
 	 "AdvSceneSwitcher.action.source.type.refreshSettings"},
-	{SourceAction::SETTINGS_BUTTON,
+	{MacroActionSource::Action::SETTINGS_BUTTON,
 	 "AdvSceneSwitcher.action.source.type.pressSettingsButton"},
+	{MacroActionSource::Action::INTERACT,
+	 "AdvSceneSwitcher.action.source.type.interact"},
 };
 
 static std::vector<SourceSettingButton> getSourceButtons(OBSWeakSource source)
@@ -78,20 +82,22 @@ bool MacroActionSource::PerformAction()
 {
 	auto s = obs_weak_source_get_source(_source.GetSource());
 	switch (_action) {
-	case SourceAction::ENABLE:
+	case Action::ENABLE:
 		obs_source_set_enabled(s, true);
 		break;
-	case SourceAction::DISABLE:
+	case Action::DISABLE:
 		obs_source_set_enabled(s, false);
 		break;
-	case SourceAction::SETTINGS:
+	case Action::SETTINGS:
 		setSourceSettings(s, _settings);
 		break;
-	case SourceAction::REFRESH_SETTINGS:
+	case Action::REFRESH_SETTINGS:
 		refreshSourceSettings(s);
 		break;
-	case SourceAction::SETTINGS_BUTTON:
+	case Action::SETTINGS_BUTTON:
 		pressSourceButton(_button, s);
+	case Action::INTERACT:
+		_interaction.SendToSource(s);
 		break;
 	default:
 		break;
@@ -119,6 +125,7 @@ bool MacroActionSource::Save(obs_data_t *obj) const
 	obs_data_set_int(obj, "action", static_cast<int>(_action));
 	_button.Save(obj);
 	_settings.Save(obj, "settings");
+	_interaction.Save(obj);
 	return true;
 }
 
@@ -126,9 +133,10 @@ bool MacroActionSource::Load(obs_data_t *obj)
 {
 	MacroAction::Load(obj);
 	_source.Load(obj);
-	_action = static_cast<SourceAction>(obs_data_get_int(obj, "action"));
+	_action = static_cast<Action>(obs_data_get_int(obj, "action"));
 	_button.Load(obj);
 	_settings.Load(obj, "settings");
+	_interaction.Load(obj);
 	return true;
 }
 
@@ -142,7 +150,7 @@ static inline void populateActionSelection(QComboBox *list)
 {
 	for (auto &[actionType, name] : actionTypes) {
 		list->addItem(obs_module_text(name.c_str()));
-		if (actionType == SourceAction::REFRESH_SETTINGS) {
+		if (actionType == MacroActionSource::Action::REFRESH_SETTINGS) {
 			list->setItemData(
 				list->count() - 1,
 				obs_module_text(
@@ -171,17 +179,17 @@ static inline void populateSourceButtonSelection(QComboBox *list,
 
 MacroActionSourceEdit::MacroActionSourceEdit(
 	QWidget *parent, std::shared_ptr<MacroActionSource> entryData)
-	: QWidget(parent)
+	: QWidget(parent),
+	  _sources(new SourceSelectionWidget(this, QStringList(), true)),
+	  _actions(new QComboBox),
+	  _settingsButtons(new QComboBox),
+	  _getSettings(new QPushButton(obs_module_text(
+		  "AdvSceneSwitcher.action.source.getSettings"))),
+	  _settings(new VariableTextEdit(this)),
+	  _warning(new QLabel(
+		  obs_module_text("AdvSceneSwitcher.action.source.warning"))),
+	  _interaction(new SourceInteractionWidget())
 {
-	_sources = new SourceSelectionWidget(this, QStringList(), true);
-	_actions = new QComboBox();
-	_settingsButtons = new QComboBox();
-	_getSettings = new QPushButton(
-		obs_module_text("AdvSceneSwitcher.action.source.getSettings"));
-	_settings = new VariableTextEdit(this);
-	_warning = new QLabel(
-		obs_module_text("AdvSceneSwitcher.action.source.warning"));
-
 	populateActionSelection(_actions);
 	auto sources = GetSourceNames();
 	sources.sort();
@@ -198,6 +206,13 @@ MacroActionSourceEdit::MacroActionSourceEdit(
 			 SLOT(GetSettingsClicked()));
 	QWidget::connect(_settings, SIGNAL(textChanged()), this,
 			 SLOT(SettingsChanged()));
+	QWidget::connect(
+		_interaction,
+		SIGNAL(SettingsChanged(SourceInteractionInstance *)), this,
+		SLOT(InteractionSettingsChanged(SourceInteractionInstance *)));
+	QWidget::connect(_interaction,
+			 SIGNAL(TypeChanged(SourceInteraction::Type)), this,
+			 SLOT(InteractionTypeChanged(SourceInteraction::Type)));
 
 	QVBoxLayout *mainLayout = new QVBoxLayout;
 	QHBoxLayout *entryLayout = new QHBoxLayout;
@@ -217,6 +232,7 @@ MacroActionSourceEdit::MacroActionSourceEdit(
 	buttonLayout->addWidget(_getSettings);
 	buttonLayout->addStretch();
 	mainLayout->addLayout(buttonLayout);
+	mainLayout->addWidget(_interaction);
 	setLayout(mainLayout);
 
 	_entryData = entryData;
@@ -237,6 +253,7 @@ void MacroActionSourceEdit::UpdateEntryData()
 	_settingsButtons->setCurrentText(
 		QString::fromStdString(_entryData->_button.ToString()));
 	_settings->setPlainText(_entryData->_settings);
+	_interaction->SetSourceInteractionSelection(_entryData->_interaction);
 	SetWidgetVisibility();
 
 	adjustSize();
@@ -266,7 +283,7 @@ void MacroActionSourceEdit::ActionChanged(int value)
 	}
 
 	std::lock_guard<std::mutex> lock(switcher->m);
-	_entryData->_action = static_cast<SourceAction>(value);
+	_entryData->_action = static_cast<MacroActionSource::Action>(value);
 	SetWidgetVisibility();
 }
 
@@ -299,22 +316,49 @@ void MacroActionSourceEdit::SettingsChanged()
 
 	std::lock_guard<std::mutex> lock(switcher->m);
 	_entryData->_settings = _settings->toPlainText().toStdString();
+}
+
+void MacroActionSourceEdit::InteractionTypeChanged(SourceInteraction::Type value)
+{
+	if (_loading || !_entryData) {
+		return;
+	}
+
+	std::lock_guard<std::mutex> lock(switcher->m);
+	_entryData->_interaction.SetType(value);
 
 	adjustSize();
 	updateGeometry();
 }
 
+void MacroActionSourceEdit::InteractionSettingsChanged(
+	SourceInteractionInstance *value)
+{
+	if (_loading || !_entryData) {
+		return;
+	}
+
+	std::lock_guard<std::mutex> lock(switcher->m);
+	_entryData->_interaction.SetSettings(value);
+}
+
 void MacroActionSourceEdit::SetWidgetVisibility()
 {
-	const bool showSettings = _entryData->_action == SourceAction::SETTINGS;
-	const bool showWarning = _entryData->_action == SourceAction::ENABLE ||
-				 _entryData->_action == SourceAction::DISABLE;
+	const bool showSettings = _entryData->_action ==
+				  MacroActionSource::Action::SETTINGS;
+	const bool showWarning =
+		_entryData->_action == MacroActionSource::Action::ENABLE ||
+		_entryData->_action == MacroActionSource::Action::DISABLE;
 	_settings->setVisible(showSettings);
 	_getSettings->setVisible(showSettings);
 	_warning->setVisible(showWarning);
-	_settingsButtons->setVisible(_entryData->_action ==
-				     SourceAction::SETTINGS_BUTTON);
+	_settingsButtons->setVisible(
+		_entryData->_action ==
+		MacroActionSource::Action::SETTINGS_BUTTON);
+	_interaction->setVisible(_entryData->_action ==
+				 MacroActionSource::Action::INTERACT);
 	adjustSize();
+	updateGeometry();
 }
 
 bool SourceSettingButton::Save(obs_data_t *obj) const
