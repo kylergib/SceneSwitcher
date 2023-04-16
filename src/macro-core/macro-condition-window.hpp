@@ -1,5 +1,8 @@
 #pragma once
 #include "macro-condition-edit.hpp"
+#include "variable-string.hpp"
+#include "variable-text-edit.hpp"
+#include "regex-config.hpp"
 
 #include <QComboBox>
 #include <QCheckBox>
@@ -20,18 +23,21 @@ public:
 	}
 
 private:
-	bool
-	CheckWindowTitleSwitchDirect(const std::string &currentWindowTitle);
-	bool
-	CheckWindowTitleSwitchRegex(const std::string &currentWindowTitle,
-				    const std::vector<std::string> &windowList);
+	bool WindowMatches(const std::string &window);
+	bool WindowRegexMatches(const std::vector<std::string> &windowList);
 
 public:
 	std::string _window;
+	bool _checkTitle = true;
 	bool _fullscreen = false;
 	bool _maximized = false;
 	bool _focus = true;
 	bool _windowFocusChanged = false;
+
+	// For now only supported on Windows
+	bool _checkText = false;
+	StringVariable _text;
+	RegexConfig _regex = RegexConfig::PartialMatchRegexConfig();
 
 private:
 	static bool _registered;
@@ -56,22 +62,30 @@ public:
 
 private slots:
 	void WindowChanged(const QString &text);
+	void CheckTitleChanged(int state);
 	void FullscreenChanged(int state);
 	void MaximizedChanged(int state);
 	void FocusedChanged(int state);
 	void WindowFocusChanged(int state);
+	void CheckTextChanged(int state);
+	void WindowTextChanged();
+	void RegexChanged(RegexConfig);
 	void UpdateFocusWindow();
 signals:
 	void HeaderInfoChanged(const QString &);
 
 protected:
 	QComboBox *_windowSelection;
+	QCheckBox *_checkTitle;
 	QCheckBox *_fullscreen;
 	QCheckBox *_maximized;
 	QCheckBox *_focused;
 	QCheckBox *_windowFocusChanged;
+	QCheckBox *_checkText;
+	VariableTextEdit *_text;
+	RegexConfigWidget *_regex;
 	QLabel *_focusWindow;
-	QHBoxLayout *_focusLayout;
+	QHBoxLayout *_currentFocusLayout;
 	QTimer _timer;
 	std::shared_ptr<MacroConditionWindow> _entryData;
 

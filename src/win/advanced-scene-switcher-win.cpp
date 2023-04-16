@@ -1,8 +1,9 @@
 #include "platform-funcs.hpp"
 #include "hotkey.hpp"
 
-#define WIN32_LEAN_AND_MEAN
+//#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <UIAutomation.h>
 #include <util/platform.h>
 #include <TlHelp32.h>
 #include <Psapi.h>
@@ -178,6 +179,178 @@ bool IsMaximized(const std::string &title)
 	return false;
 }
 
+//std::optional<std::string> GetTextInWindow(const std::string &window)
+//{
+//	HWND hwnd = getHWNDfromTitle(window);
+//	if (!hwnd) {
+//		return {};
+//	}
+//
+//	std::wstring result;
+//	HWND childHwnd = GetWindow(hwnd, GW_CHILD);
+//	while (childHwnd) {
+//		std::wstring text;
+//		text.resize(4096);
+//		if (SendMessageW(childHwnd, WM_GETTEXT, text.capacity(),
+//				 (LPARAM)&text[0])) {
+//			result += L"\n" + text;
+//		}
+//		childHwnd = GetWindow(childHwnd, GW_HWNDNEXT);
+//	}
+//
+//	// Remove last space
+//	if (!result.empty()) {
+//		result.pop_back();
+//	}
+//
+//	// Convert to std::string
+//	int len = os_wcs_to_utf8(result.c_str(), 0, nullptr, 0);
+//	std::string tmp;
+//	tmp.resize(len);
+//	os_wcs_to_utf8(result.c_str(), 0, &tmp[0], len + 1);
+//	return tmp;
+//}
+
+static std::wstring GetControlText(HWND hwnd, IUIAutomationElement *element)
+{
+	VARIANT var;
+	HRESULT hr = element->GetCurrentPropertyValue(UIA_NamePropertyId, &var);
+	if (FAILED(hr)) {
+		return L"";
+	}
+
+	std::wstring text = L"";
+	if (var.vt == VT_BSTR && var.bstrVal) {
+		text = var.bstrVal;
+	}
+
+	VariantClear(&var);
+	return text;
+}
+
+std::optional<std::string> GetTextInWindow(const std::string &window)
+{
+	HWND hwnd = getHWNDfromTitle(window);
+	if (!hwnd) {
+		return {};
+	}
+
+	IUIAutomation *automation = nullptr;
+	auto hr = CoCreateInstance(__uuidof(CUIAutomation), nullptr,
+				   CLSCTX_INPROC_SERVER,
+				   __uuidof(IUIAutomation),
+				   reinterpret_cast<void **>(&automation));
+	if (FAILED(hr)) {
+		return {};
+	}
+
+	IUIAutomationElement *rootElement = nullptr;
+	hr = automation->ElementFromHandle(hwnd, &rootElement);
+	if (FAILED(hr)) {
+		automation->Release();
+		return {};
+	}
+
+	IUIAutomationTreeWalker *walker = nullptr;
+	hr = automation->get_ControlViewWalker(&walker);
+	if (FAILED(hr)) {
+		rootElement->Release();
+		automation->Release();
+		return {};
+	}
+
+	IUIAutomationElement *element = nullptr;
+	std::wstring result;
+
+	hr = walker->GetFirstChildElement(rootElement, &element);
+	while (SUCCEEDED(hr) && element != nullptr) {
+		auto text = GetControlText(hwnd, element);
+		if (!text.empty()) {
+			result += text + L"\n";
+		}
+
+		IUIAutomationElement *nextElement = nullptr;
+		hr = walker->GetNextSiblingElement(element, &nextElement);
+		element->Release();
+		element = nextElement;
+	}
+
+	walker->Release();
+	rootElement->Release();
+	automation->Release();
+
+	// Convert to std::string
+	int len = os_wcs_to_utf8(result.c_str(), 0, nullptr, 0);
+	std::string tmp;
+	tmp.resize(len);
+	os_wcs_to_utf8(result.c_str(), 0, &tmp[0], len + 1);
+	return tmp;
+}
+
+//std::optional<std::string> GetTextInWindow(const std::string &window)
+//
+//	HWND hwnd = getHWNDfromTitle(window);
+//	if (!hwnd) {
+//		return {};
+//	}
+//
+//	// Get the IAccessible interface for the window
+//	IAccessible *acc = nullptr;
+//	auto res = AccessibleObjectFromWindow(hwnd, OBJID_CLIENT,
+//					      IID_IAccessible, (void **)&acc);
+//	if (!SUCCEEDED(res) || acc == nullptr) {
+//		return {};
+//	}
+//
+//	// Get the number of child elements of the window
+//	long numChild = 0;
+//	acc->get_accChildCount(&numChild);
+//
+//	// Loop through all child elements of the window
+//	std::wstring result;
+//	for (long i = 0; i < numChild; i++) {
+//		// Get the IAccessible interface for the child element
+//		VARIANT varChild;
+//		varChild.vt = VT_I4;
+//		varChild.lVal = i + 1;
+//		IDispatch *dispatch = nullptr;
+//		res = acc->get_accChild(varChild, &dispatch);
+//
+//		if (!SUCCEEDED(res) || dispatch == nullptr) {
+//			continue;
+//		}
+//
+//		// Query the IAccessible interface for the child element
+//		IAccessible *childAcc = nullptr;
+//		res = dispatch->QueryInterface(IID_IAccessible,
+//					       (void **)&childAcc);
+//		dispatch->Release();
+//
+//		if (!SUCCEEDED(res) || childAcc == nullptr) {
+//			continue;
+//		}
+//
+//		// Get the text associated with the child element
+//		BSTR bstrName;
+//		res = childAcc->get_accName(varChild, &bstrName);
+//		if (SUCCEEDED(res) && bstrName != nullptr) {
+//			std::wstring ws(bstrName, SysStringLen(bstrName));
+//			std::string s(ws.begin(), ws.end());
+//			result += ws + L"\n";
+//			SysFreeString(bstrName);
+//		}
+//		childAcc->Release();
+//	}
+//	acc->Release();
+//
+//	// Convert to std::string
+//	int len = os_wcs_to_utf8(result.c_str(), 0, nullptr, 0);
+//	std::string tmp;
+//	tmp.resize(len);
+//	os_wcs_to_utf8(result.c_str(), 0, &tmp[0], len + 1);
+//	return tmp;
+//
+//
 bool IsFullscreen(const std::string &title)
 {
 	RECT appBounds;
@@ -539,6 +712,8 @@ static void SetupMouseEeventFilter()
 void PlatformInit()
 {
 	SetupMouseEeventFilter();
+
+	CoInitialize(NULL);
 }
 
 void PlatformCleanup()
@@ -547,6 +722,8 @@ void PlatformCleanup()
 		delete mouseInputFilter;
 		mouseInputFilter = nullptr;
 	}
+
+	CoUninitialize();
 }
 
 } // namespace advss
