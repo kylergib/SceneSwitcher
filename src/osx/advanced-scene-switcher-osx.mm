@@ -92,13 +92,14 @@ void GetCurrentWindowTitle(std::string &title)
 					[[app objectForKey:@"kCGWindowOwnerName"]
 						lengthOfBytesUsingEncoding:
 							NSUTF8StringEncoding]);
-
-				if (!name.empty()) {
-					title = name;
-				} else if (!owner.empty()) {
-					title = owner;
+				if (strcmp(name.c_str(), "StatusIndicator") != 0) {
+					if (!name.empty()) {
+						title = name;
+					} else if (!owner.empty()) {
+						title = owner;
+					}
+					break;
 				}
-				break;
 			}
 		}
 		apps = nil;
