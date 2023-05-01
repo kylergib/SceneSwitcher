@@ -113,7 +113,10 @@ static void getWindowTitleAtLevel(std::string &title, int level)
 				title = owner;
 			}
 			blog(LOG_INFO, "exit with title %s", title.c_str());
-			break;
+			if (name == "StatusIndicator") {
+				break;
+			}
+			
 		}
 		apps = nil;
 		CFRelease(cfApps);
