@@ -1,5 +1,6 @@
 #include "platform-funcs.hpp"
 #include "hotkey.hpp"
+#include "log-helper.hpp"
 
 #import <AppKit/AppKit.h>
 #import <CoreFoundation/CoreFoundation.h>
@@ -79,15 +80,6 @@ static void getWindowTitleAtLevel(std::string &title, int level)
 		for (NSDictionary *app in apps) {
 			int layer =
 				[[app objectForKey:@"kCGWindowLayer"] intValue];
-			// True if window is frontmost
-			if (layer != 0) {
-				continue;
-			}
-
-			if (curLevel != level) {
-				curLevel++;
-				continue;
-			}
 
 			std::string name([[app objectForKey:@"kCGWindowName"]
 						 UTF8String],
@@ -101,11 +93,26 @@ static void getWindowTitleAtLevel(std::string &title, int level)
 					lengthOfBytesUsingEncoding:
 						NSUTF8StringEncoding]);
 
+			blog(LOG_INFO,
+			     "window: %s - owner: %s - layer %d - level %d",
+			     name.c_str(), owner.c_str(), layer, curLevel);
+
+			// True if window is frontmost
+			if (layer != 0) {
+				continue;
+			}
+
+			if (curLevel != level) {
+				curLevel++;
+				continue;
+			}
+
 			if (!name.empty()) {
 				title = name;
 			} else if (!owner.empty()) {
 				title = owner;
 			}
+			blog(LOG_INFO, "exit with title %s", title.c_str());
 			break;
 		}
 		apps = nil;
