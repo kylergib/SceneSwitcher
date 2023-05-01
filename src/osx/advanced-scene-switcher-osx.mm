@@ -113,7 +113,7 @@ static void getWindowTitleAtLevel(std::string &title, int level)
 				title = owner;
 			}
 			blog(LOG_INFO, "exit with title %s", title.c_str());
-			if (name.c_str() != "StatusIndicator") {
+			if (title.c_str() != "StatusIndicator") {
 				break;
 			}
 			
